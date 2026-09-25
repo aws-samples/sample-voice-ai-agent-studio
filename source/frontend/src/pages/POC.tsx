@@ -152,15 +152,13 @@ function POC() {
       case 'sessionReady':
       case 'system':
         console.log('System:', data.message || data.config);
-        // The agent reports the model's audio sample rate so we play/capture at
-        // the right rate (Nova Sonic 16 kHz; OpenAI Realtime / Gemini Live 24 kHz).
+        // The agent reports the model's output sample rate so we play audio back
+        // at the right rate (Nova Sonic 16 kHz; OpenAI Realtime / Gemini Live 24 kHz).
+        // Input/capture rate is set synchronously at connect time from the
+        // selected model, so we don't override it here.
         if (typeof data.outputSampleRate === 'number' && data.outputSampleRate > 0) {
           outputSampleRateRef.current = data.outputSampleRate;
         }
-        if (typeof data.inputSampleRate === 'number' && data.inputSampleRate > 0) {
-          inputSampleRateRef.current = data.inputSampleRate;
-        }
-        readyReceivedRef.current = true;
         break;
       case 'bidi_audio_stream':
         // Audio response from Nova Sonic
@@ -168,9 +166,10 @@ function POC() {
         setAgentSpeaking(true);
         break;
       case 'bidi_transcript_stream':
-        // Show user transcripts (final = what ASR heard) and agent speculative transcripts
-        // Skip final agent transcripts (they duplicate speculative ones)
-        if (data.is_final && (data.role === 'assistant' || data.role === 'agent')) break;
+        // Display speculative transcripts only. Nova Sonic emits both a
+        // speculative and a final transcript per turn (for both user and agent);
+        // showing both duplicates every line, so skip the finals for both roles.
+        if (data.is_final) break;
         if (data.text && data.text.trim()) {
           setTranscript((prev) => [
             ...prev,
@@ -259,10 +258,6 @@ function POC() {
   // until the agent tells us otherwise.
   const outputSampleRateRef = useRef(16000);
   const inputSampleRateRef = useRef(16000);
-  // Set true when the agent's "system" ready message arrives (carries the
-  // negotiated sample rates). Capture waits on this so it opens the mic at the
-  // right rate for the selected provider.
-  const readyReceivedRef = useRef(false);
 
   const playAudioBase64 = async (base64Audio: string) => {
     try {
@@ -635,18 +630,18 @@ function POC() {
         callerId: user?.username || user?.email || '',
       };
       console.log('[POC] Session config being sent:', { tools: builtinTools.length, customTools: allCustomTools.length, customToolNames: allCustomTools.map((t: any) => t.name) });
-      readyReceivedRef.current = false;
       ws.send(JSON.stringify(sessionConfig));
 
-      // Wait (briefly) for the agent's "system" ready message so we know the
-      // negotiated sample rate before opening the mic. Fall back after 3s so a
-      // missing/renamed ready message never blocks the session.
-      const readyDeadline = Date.now() + 3000;
-      while (!readyReceivedRef.current && Date.now() < readyDeadline) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      // Determine the capture (input) rate synchronously from the selected model
+      // so we can start the mic immediately — waiting on the server's ready
+      // message delayed capture and clipped the start of the caller's first
+      // words (garbling names/numbers for Nova). Nova = 16 kHz; OpenAI/Gemini = 24 kHz.
+      const _selModel = (state.model || ['nova-2-sonic'])[0];
+      inputSampleRateRef.current =
+        _selModel === 'openai-realtime' || _selModel === 'gemini-live' ? 24000 : 16000;
 
-      // Start audio capture (at the negotiated input rate)
+      // Start audio capture immediately (as before the multi-provider change).
+      // The server's "system" message still updates the playback rate on arrival.
       await startAudioCapture();
     } catch (err: any) {
       setConnectionStatus('error');
