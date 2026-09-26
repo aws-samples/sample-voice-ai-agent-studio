@@ -54,6 +54,7 @@ WebSocket and read agent configs from the `voice-agent-poc-demos` DynamoDB table
 | [`docs/GUIDE-pstn-relay-server.md`](../docs/GUIDE-pstn-relay-server.md) | PSTN relay design, network architecture, security |
 | [`docs/GUIDE-sip-server.md`](../docs/GUIDE-sip-server.md) | SIP server design, network architecture, production security |
 | [`docs/SETUP-twilio-sip.md`](../docs/SETUP-twilio-sip.md) | Twilio SIP Trunk setup |
+| [`docs/SETUP-telnyx-sip.md`](../docs/SETUP-telnyx-sip.md) | Telnyx SIP Trunk setup |
 | [`docs/SETUP-chime-sdk-sip.md`](../docs/SETUP-chime-sdk-sip.md) | Amazon Chime SDK SIP setup |
 | [`docs/GUIDE-genesys-sip-integration.md`](../docs/GUIDE-genesys-sip-integration.md) | Genesys Cloud CX integration |
 | [`docs/GUIDE-connect-integration.md`](../docs/GUIDE-connect-integration.md) | Amazon Connect integration |

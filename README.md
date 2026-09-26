@@ -125,6 +125,7 @@ Direct SIP integration for enterprise contact centers (Genesys, Five9, NICE) or 
 | [GUIDE-pstn-relay-server.md](docs/GUIDE-pstn-relay-server.md) | PSTN relay design, network architecture, and security |
 | [GUIDE-sip-server.md](docs/GUIDE-sip-server.md) | SIP server design, network architecture, and production security |
 | [SETUP-twilio-sip.md](docs/SETUP-twilio-sip.md) | Twilio SIP Trunk setup (UI + CLI) |
+| [SETUP-telnyx-sip.md](docs/SETUP-telnyx-sip.md) | Telnyx SIP Trunk setup (UI + CLI) |
 | [GUIDE-genesys-sip-integration.md](docs/GUIDE-genesys-sip-integration.md) | Genesys Cloud CX integration |
 | [GUIDE-connect-integration.md](docs/GUIDE-connect-integration.md) | Amazon Connect integration |
 

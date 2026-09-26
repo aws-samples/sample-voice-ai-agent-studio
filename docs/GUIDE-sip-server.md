@@ -261,5 +261,6 @@ Challenge unknown INVITEs with 401/407 response requiring credentials. Stops una
 ## Related Documentation
 
 - [SETUP-twilio-sip.md](SETUP-twilio-sip.md) — Twilio SIP Trunk configuration
+- [SETUP-telnyx-sip.md](SETUP-telnyx-sip.md) — Telnyx SIP Trunk configuration
 - [GUIDE-genesys-sip-integration.md](GUIDE-genesys-sip-integration.md) — Genesys Cloud CX integration
 - [GUIDE-connect-integration.md](GUIDE-connect-integration.md) — Amazon Connect integration
