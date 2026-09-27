@@ -123,6 +123,12 @@ The bridge's IAM role/task needs `secretsmanager:GetSecretValue` on the
 | `DRACHTIO_SECRET` | `cymru` | drachtio admin secret (bridge → drachtio control on 9022) |
 | `PORT` | `3000` | Bridge HTTP port (serves `/health` only) |
 | `LOG_LEVEL` | `info` | Logging level |
+| `OPENAI_API_KEY` | — | Provider key when a saved agent selects `openai-realtime` |
+| `GOOGLE_API_KEY` | — | Provider key when a saved agent selects `gemini-live` |
+
+The relay uses the model selected in the saved agent and negotiates its audio
+rate with AgentCore. SIP audio remains G.711 μ-law at 8 kHz; the relay resamples
+it to 16 kHz for Nova or 24 kHz for OpenAI and Gemini.
 
 > `configure.sh` also generates and stores a `WEBHOOK_SECRET`/`DRACHTIO_SECRET`
 > in the secret. The bridge only reads `DRACHTIO_SECRET`; `WEBHOOK_SECRET` is

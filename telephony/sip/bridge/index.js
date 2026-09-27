@@ -120,6 +120,7 @@ async function getAgentConfig() {
         voiceId: config.voice?.voiceId || 'tiffany',
         tools: config.tools || [],
         agentStartFirst: config.agentStartFirst ?? true,
+        model: config.model || ['nova-2-sonic'],
       };
     }
   } catch (e) {
@@ -131,6 +132,7 @@ async function getAgentConfig() {
     voiceId: 'tiffany',
     tools: [],
     agentStartFirst: true,
+    model: ['nova-2-sonic'],
   };
 }
 
@@ -179,32 +181,24 @@ function mulawToPcm(mulawBuffer) {
   return pcm;
 }
 
-// Simple linear interpolation upsample 8kHz → 16kHz
-function upsample8to16(pcm8k) {
-  const samples8 = pcm8k.length / 2;
-  const pcm16k = Buffer.alloc(samples8 * 4); // double the samples
-  for (let i = 0; i < samples8 - 1; i++) {
-    const s0 = pcm8k.readInt16LE(i * 2);
-    const s1 = pcm8k.readInt16LE((i + 1) * 2);
-    pcm16k.writeInt16LE(s0, i * 4);
-    pcm16k.writeInt16LE(Math.round((s0 + s1) / 2), i * 4 + 2);
+// Linear interpolation between the 8 kHz phone boundary and the model rate.
+function resamplePcm16(pcm, fromRate, toRate) {
+  if (fromRate === toRate) return pcm;
+  const inputSamples = Math.floor(pcm.length / 2);
+  if (inputSamples === 0) return Buffer.alloc(0);
+  const outputSamples = Math.max(1, Math.round(inputSamples * toRate / fromRate));
+  const output = Buffer.alloc(outputSamples * 2);
+  const ratio = fromRate / toRate;
+  for (let i = 0; i < outputSamples; i++) {
+    const position = Math.min(i * ratio, inputSamples - 1);
+    const lower = Math.floor(position);
+    const upper = Math.min(lower + 1, inputSamples - 1);
+    const fraction = position - lower;
+    const a = pcm.readInt16LE(lower * 2);
+    const b = pcm.readInt16LE(upper * 2);
+    output.writeInt16LE(Math.round(a + (b - a) * fraction), i * 2);
   }
-  // Last sample
-  const last = pcm8k.readInt16LE((samples8 - 1) * 2);
-  pcm16k.writeInt16LE(last, (samples8 - 1) * 4);
-  pcm16k.writeInt16LE(last, (samples8 - 1) * 4 + 2);
-  return pcm16k;
-}
-
-// Simple downsample 16kHz → 8kHz (take every other sample)
-function downsample16to8(pcm16k) {
-  const samples16 = pcm16k.length / 2;
-  const samples8 = Math.floor(samples16 / 2);
-  const pcm8k = Buffer.alloc(samples8 * 2);
-  for (let i = 0; i < samples8; i++) {
-    pcm8k.writeInt16LE(pcm16k.readInt16LE(i * 4), i * 2);
-  }
-  return pcm8k;
+  return output;
 }
 
 /**
@@ -352,7 +346,11 @@ srf.invite(async (req, res) => {
       source: 'sip',
       host: 'agentcore',
       framework: 'strands-bidiagent',
-      model: ['nova-2-sonic'],
+      model: agentConfig.model,
+      apiKeys: {
+        ...(process.env.OPENAI_API_KEY ? { openai: process.env.OPENAI_API_KEY } : {}),
+        ...(process.env.GOOGLE_API_KEY ? { gemini: process.env.GOOGLE_API_KEY } : {}),
+      },
       systemPrompt: agentConfig.systemPrompt,
       pipeline: 'speech-to-speech',
       voice: { voiceId: agentConfig.voiceId, language: 'en-US', gender: 'female' },
@@ -365,7 +363,7 @@ srf.invite(async (req, res) => {
     }));
 
     // Wait for agent ready message
-    await new Promise((resolve, reject) => {
+    const readyMessage = await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Agent ready timeout')), 30000);
       agentWs.on('message', function onReady(data) {
         try {
@@ -374,11 +372,14 @@ srf.invite(async (req, res) => {
             clearTimeout(timeout);
             agentWs.removeListener('message', onReady);
             logger.info({ callId, msg: msg.message || msg.type }, 'Agent ready');
-            resolve();
+            resolve(msg);
           }
         } catch (e) { /* ignore parse errors */ }
       });
     });
+    const inputSampleRate = Number(readyMessage.inputSampleRate) || 16000;
+    const outputSampleRate = Number(readyMessage.outputSampleRate) || 16000;
+    logger.info({ callId, inputSampleRate, outputSampleRate }, 'Negotiated agent audio rates');
 
     // Give the agent's internal run loop time to start accepting audio
     // Wait for first audio output (greeting) which confirms the loop is running
@@ -505,18 +506,18 @@ srf.invite(async (req, res) => {
         const batch = audioBuffer.slice(0, BATCH_SIZE);
         audioBuffer = audioBuffer.slice(BATCH_SIZE);
         const pcm8k = mulawToPcm(batch);
-        const pcm16k = upsample8to16(pcm8k);
+        const modelPcm = resamplePcm16(pcm8k, 8000, inputSampleRate);
 
         // Add comfort noise dither to pure silence — prevents near-zero PCM
         // that Nova Sonic may misinterpret (web/TAC always have ambient room noise)
-        for (let i = 0; i < pcm16k.length; i += 2) {
-          const sample = pcm16k.readInt16LE(i);
+        for (let i = 0; i < modelPcm.length; i += 2) {
+          const sample = modelPcm.readInt16LE(i);
           if (sample > -10 && sample < 10) {
-            pcm16k.writeInt16LE(Math.floor(Math.random() * 20) - 10, i);
+            modelPcm.writeInt16LE(Math.floor(Math.random() * 20) - 10, i);
           }
         }
 
-        const pcmB64 = pcm16k.toString('base64');
+        const pcmB64 = modelPcm.toString('base64');
 
         try {
           if (agentWs.readyState === WebSocket.OPEN) {
@@ -524,7 +525,7 @@ srf.invite(async (req, res) => {
               type: 'bidi_audio_input',
               audio: pcmB64,
               format: 'pcm',
-              sample_rate: 16000,
+              sample_rate: inputSampleRate,
               channels: 1,
             }));
           }
@@ -554,8 +555,8 @@ srf.invite(async (req, res) => {
 
         if (msg.type === 'bidi_audio_stream' && msg.audio) {
           if (rtpRemotePort && rtpRemoteAddr) {
-            const pcm16k = Buffer.from(msg.audio, 'base64');
-            const pcm8k = downsample16to8(pcm16k);
+            const modelPcm = Buffer.from(msg.audio, 'base64');
+            const pcm8k = resamplePcm16(modelPcm, outputSampleRate, 8000);
             const mulaw = pcmToMulaw(pcm8k);
 
             // Queue 20ms chunks (160 bytes each) for paced sending
