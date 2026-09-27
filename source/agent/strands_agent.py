@@ -535,6 +535,8 @@ async def handle_websocket_session(websocket: WebSocket, send_output):
                     user_id=config.get("userId", ""),
                     source=source,
                     caller_id=config.get("callerId", ""),
+                    input_sample_rate=model_sample_rate,
+                    output_sample_rate=model_sample_rate,
                 )
                 logger.info(f"📝 Call history logging enabled (session={call_logger.session_id}, source={source})")
             except Exception as e:
