@@ -22,12 +22,38 @@ logger = logging.getLogger(__name__)
 
 # Max audio buffer size (50MB) to prevent OOM on very long calls
 MAX_AUDIO_BUFFER_BYTES = 50 * 1024 * 1024
+DEFAULT_AUDIO_SAMPLE_RATE = 16000
+
+
+def pcm_to_wav(raw_pcm: bytes, sample_rate: int) -> bytes:
+    """Wrap 16-bit mono PCM in a WAV container at the supplied sample rate."""
+    if not isinstance(sample_rate, int) or sample_rate <= 0:
+        raise ValueError("sample_rate must be a positive integer")
+    bytes_per_sample = 2
+    buf = io.BytesIO()
+    buf.write(b"RIFF")
+    buf.write(struct.pack("<I", 36 + len(raw_pcm)))
+    buf.write(b"WAVEfmt ")
+    buf.write(struct.pack(
+        "<IHHIIHH",
+        16,
+        1,
+        1,
+        sample_rate,
+        sample_rate * bytes_per_sample,
+        bytes_per_sample,
+        16,
+    ))
+    buf.write(b"data")
+    buf.write(struct.pack("<I", len(raw_pcm)))
+    buf.write(raw_pcm)
+    return buf.getvalue()
 
 
 class CallHistoryLogger:
     """Captures session data and uploads to S3 on session end."""
 
-    def __init__(self, agent_id: str, session_id: str = None, s3_bucket: str = None, user_id: str = "", source: str = "webchat", caller_id: str = ""):
+    def __init__(self, agent_id: str, session_id: str = None, s3_bucket: str = None, user_id: str = "", source: str = "webchat", caller_id: str = "", input_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE, output_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE):
         self.agent_id = agent_id
         self.session_id = session_id or str(uuid.uuid4())
         self.s3_bucket = s3_bucket or os.environ.get("CALL_HISTORY_BUCKET", "")
@@ -44,6 +70,8 @@ class CallHistoryLogger:
         self.user_id = user_id
         self.source = source  # "webchat", "telephony", "sip", "eval"
         self.caller_id = caller_id  # phone number, username, SIP URI — depends on source
+        self.input_sample_rate = input_sample_rate
+        self.output_sample_rate = output_sample_rate
         self.started_at = datetime.now(timezone.utc)
         self.transcript_turns: list = []
         self.audio_chunks: list = []
@@ -192,18 +220,6 @@ class CallHistoryLogger:
                 logger.info(f"Uploaded events: {len(self.events)} entries")
 
             # 3. Upload per-turn audio files
-            def _make_wav(raw_pcm: bytes) -> bytes:
-                """Create WAV from raw 16kHz 16-bit mono PCM."""
-                buf = io.BytesIO()
-                buf.write(b"RIFF")
-                buf.write(struct.pack("<I", 36 + len(raw_pcm)))
-                buf.write(b"WAVEfmt ")
-                buf.write(struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16))
-                buf.write(b"data")
-                buf.write(struct.pack("<I", len(raw_pcm)))
-                buf.write(raw_pcm)
-                return buf.getvalue()
-
             def _trim_silence(raw_pcm: bytes, threshold: int = 500) -> bytes:
                 """Trim leading and trailing silence from 16-bit PCM audio."""
                 import array
@@ -234,7 +250,7 @@ class CallHistoryLogger:
                     s3.put_object(
                         Bucket=self.s3_bucket,
                         Key=f"{prefix}audio/turn_{turn_idx}_agent.wav",
-                        Body=_make_wav(raw),
+                        Body=pcm_to_wav(raw, self.output_sample_rate),
                         ContentType="audio/wav",
                     )
 
@@ -244,11 +260,11 @@ class CallHistoryLogger:
                 if chunks:
                     raw = b"".join(chunks)
                     trimmed = _trim_silence(raw)
-                    if len(trimmed) > 320:  # At least 10ms of audio
+                    if len(trimmed) > self.input_sample_rate // 50:  # At least 10ms
                         s3.put_object(
                             Bucket=self.s3_bucket,
                             Key=f"{prefix}audio/turn_{turn_idx}_user.wav",
-                            Body=_make_wav(trimmed),
+                            Body=pcm_to_wav(trimmed, self.input_sample_rate),
                             ContentType="audio/wav",
                         )
 
@@ -258,7 +274,7 @@ class CallHistoryLogger:
                 s3.put_object(
                     Bucket=self.s3_bucket,
                     Key=f"{prefix}audio/agent_output.wav",
-                    Body=_make_wav(raw),
+                    Body=pcm_to_wav(raw, self.output_sample_rate),
                     ContentType="audio/wav",
                 )
 
@@ -271,11 +287,11 @@ class CallHistoryLogger:
                 all_user_raw += b"".join(user_chunks_all)
             if all_user_raw:
                 trimmed_all = _trim_silence(all_user_raw)
-                if len(trimmed_all) > 320:
+                if len(trimmed_all) > self.input_sample_rate // 50:
                     s3.put_object(
                         Bucket=self.s3_bucket,
                         Key=f"{prefix}audio/user_input.wav",
-                        Body=_make_wav(trimmed_all),
+                        Body=pcm_to_wav(trimmed_all, self.input_sample_rate),
                         ContentType="audio/wav",
                     )
 
@@ -290,6 +306,8 @@ class CallHistoryLogger:
                 "userId": self.user_id,
                 "callerId": self.caller_id,
                 "source": self.source,
+                "inputSampleRate": self.input_sample_rate,
+                "outputSampleRate": self.output_sample_rate,
                 "startedAt": self.started_at.isoformat(),
                 "endedAt": ended_at.isoformat(),
                 "durationSeconds": duration,

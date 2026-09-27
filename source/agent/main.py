@@ -619,6 +619,9 @@ async def websocket_handler(websocket, request_context=None):
             sonic_model_id=sonic_model_id,
             params=_params,
         )
+        if call_logger:
+            call_logger.input_sample_rate = model_sample_rate
+            call_logger.output_sample_rate = model_sample_rate
         logger.info(f"Model created: provider={selected_model}, output_sample_rate={model_sample_rate}")
         agent = BidiAgent(
             model=model,
