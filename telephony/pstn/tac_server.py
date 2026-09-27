@@ -26,6 +26,8 @@ from botocore.credentials import Credentials
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import Response
 
+from audio import mulaw_8k_to_pcm, pcm_to_mulaw_8k
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -237,7 +239,7 @@ async def _prewarm_agentcore(called: str):
     try:
         url = await generate_presigned_ws_url()
         ws = await websockets.connect(url)
-        _warm_connections["latest"] = ws
+        _warm_connections["latest"] = (ws, {})
         logger.info("AgentCore pre-warmed")
     except Exception as e:
         logger.warning(f"Pre-warm failed (non-fatal): {e}")
@@ -257,6 +259,7 @@ async def _prewarm_with_config(demo_id: str):
         reasoner_model = config.get("reasonerModel", "")
         use_mock = config.get("useMock", True)
         inference_config = config.get("inferenceConfig", {}) if isinstance(config.get("inferenceConfig"), dict) else {}
+        selected_model = (config.get("model") or ["nova-2-sonic"])[0]
         prompt_parts = []
         if config.get("systemPrompt"):
             prompt_parts.append(config["systemPrompt"])
@@ -272,7 +275,13 @@ async def _prewarm_with_config(demo_id: str):
             "clientId": f"twilio-{demo_id}",
             "host": "agentcore",
             "framework": "strands-bidiagent",
-            "model": ["nova-2-sonic"],
+            "model": [selected_model],
+            "apiKeys": {
+                key: value for key, value in {
+                    "openai": _cfg("OPENAI_API_KEY"),
+                    "gemini": _cfg("GOOGLE_API_KEY"),
+                }.items() if value
+            },
             "systemPrompt": system_prompt,
             "tools": tools,
             "customTools": custom_tools,
@@ -287,8 +296,8 @@ async def _prewarm_with_config(demo_id: str):
             "source": "telephony",
         }))
         # Wait for ready
-        ready = await asyncio.wait_for(ws.recv(), timeout=30)
-        _warm_connections["latest"] = ws
+        ready = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
+        _warm_connections["latest"] = (ws, ready)
         logger.info(f"AgentCore pre-warmed with config: {item.get('name', demo_id)}")
     except Exception as e:
         logger.warning(f"Pre-warm with config failed (non-fatal): {e}")
@@ -327,9 +336,10 @@ async def media_stream(websocket: WebSocket):
     reasoner_model = ""
     use_mock = True
     inference_config = {}
+    selected_model = "nova-2-sonic"
 
     def load_demo_config():
-        nonlocal voice_id, system_prompt, agent_start_first, greeting, tools, custom_tools, reasoner_model, use_mock, inference_config
+        nonlocal voice_id, system_prompt, agent_start_first, greeting, tools, custom_tools, reasoner_model, use_mock, inference_config, selected_model
         if not demo_id:
             return
         try:
@@ -347,6 +357,7 @@ async def media_stream(websocket: WebSocket):
             reasoner_model = config.get("reasonerModel", "")
             use_mock = config.get("useMock", True)
             inference_config = config.get("inferenceConfig", {}) if isinstance(config.get("inferenceConfig"), dict) else {}
+            selected_model = (config.get("model") or ["nova-2-sonic"])[0]
             prompt_parts = []
             if config.get("systemPrompt"):
                 prompt_parts.append(config["systemPrompt"])
@@ -361,7 +372,10 @@ async def media_stream(websocket: WebSocket):
 
     try:
         # Use pre-warmed connection if available, otherwise connect fresh
-        agentcore_ws = _warm_connections.pop("latest", None)
+        warm_connection = _warm_connections.pop("latest", None)
+        ready = {}
+        if warm_connection:
+            agentcore_ws, ready = warm_connection
         if agentcore_ws and agentcore_ws.open:
             logger.info("Using pre-warmed AgentCore connection (already configured)")
         else:
@@ -375,7 +389,13 @@ async def media_stream(websocket: WebSocket):
                 "clientId": f"twilio-{demo_id or 'phone'}",
                 "host": "agentcore",
                 "framework": "strands-bidiagent",
-                "model": ["nova-2-sonic"],
+                "model": [selected_model],
+                "apiKeys": {
+                    key: value for key, value in {
+                        "openai": _cfg("OPENAI_API_KEY"),
+                        "gemini": _cfg("GOOGLE_API_KEY"),
+                    }.items() if value
+                },
                 "systemPrompt": system_prompt,
                 "tools": tools,
                 "customTools": custom_tools,
@@ -392,8 +412,14 @@ async def media_stream(websocket: WebSocket):
             }))
 
             # Wait for ready
-            ready = await asyncio.wait_for(agentcore_ws.recv(), timeout=30)
+            ready = json.loads(await asyncio.wait_for(agentcore_ws.recv(), timeout=30))
             logger.info("AgentCore ready")
+
+        if isinstance(ready, str):
+            ready = json.loads(ready)
+        input_sample_rate = int(ready.get("inputSampleRate", 16000))
+        output_sample_rate = int(ready.get("outputSampleRate", 16000))
+        logger.info("Negotiated agent audio rates: input=%s output=%s", input_sample_rate, output_sample_rate)
 
         async def twilio_to_agent():
             """Receive mulaw from Twilio, convert to PCM 16kHz, send to BidiAgent."""
@@ -413,13 +439,13 @@ async def media_stream(websocket: WebSocket):
                         payload = data.get("media", {}).get("payload", "")
                         if payload and agentcore_ws:
                             mulaw_bytes = base64.b64decode(payload)
-                            pcm_16k = mulaw_8k_to_pcm_16k(mulaw_bytes)
-                            pcm_b64 = base64.b64encode(pcm_16k).decode()
+                            pcm = mulaw_8k_to_pcm(mulaw_bytes, input_sample_rate)
+                            pcm_b64 = base64.b64encode(pcm).decode()
                             await agentcore_ws.send(json.dumps({
                                 "type": "bidi_audio_input",
                                 "audio": pcm_b64,
                                 "format": "pcm",
-                                "sample_rate": 16000,
+                                "sample_rate": input_sample_rate,
                                 "channels": 1,
                             }))
                     elif event == "stop":
@@ -442,7 +468,7 @@ async def media_stream(websocket: WebSocket):
                         audio_b64 = data.get("audio", "")
                         if audio_b64:
                             pcm_bytes = base64.b64decode(audio_b64)
-                            mulaw_bytes = pcm_to_mulaw_8k(pcm_bytes)
+                            mulaw_bytes = pcm_to_mulaw_8k(pcm_bytes, output_sample_rate)
                             mulaw_b64 = base64.b64encode(mulaw_bytes).decode()
                             await websocket.send_text(json.dumps({
                                 "event": "media",
@@ -474,28 +500,6 @@ async def media_stream(websocket: WebSocket):
             except Exception:
                 pass
         logger.info("Session closed")
-
-
-# ─── Audio conversion ────────────────────────────────────────────────────────
-
-import audioop
-
-
-def mulaw_8k_to_pcm_16k(mulaw_data: bytes) -> bytes:
-    """Convert mulaw 8kHz to PCM 16-bit signed 16kHz."""
-    # Decode mulaw to PCM 16-bit at 8kHz using Python's audioop
-    pcm_8k = audioop.ulaw2lin(mulaw_data, 2)
-    # Upsample 8kHz → 16kHz (ratecv)
-    pcm_16k, _ = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, None)
-    return pcm_16k
-
-
-def pcm_to_mulaw_8k(pcm_data: bytes) -> bytes:
-    """Convert PCM 16-bit (16kHz from Nova Sonic) to mulaw 8kHz."""
-    # Downsample 16kHz → 8kHz
-    pcm_8k, _ = audioop.ratecv(pcm_data, 2, 1, 16000, 8000, None)
-    # Encode to mulaw
-    return audioop.lin2ulaw(pcm_8k, 2)
 
 
 # ─── SigV4 presign ──────────────────────────────────────────────────────────

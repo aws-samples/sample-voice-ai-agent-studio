@@ -92,6 +92,12 @@ The bridge's IAM role/task needs `secretsmanager:GetSecretValue` on the
 | `DEMOS_TABLE_NAME` | no | Agent config table (default `voice-agent-poc-demos`) |
 | `TWILIO_VOICE_PUBLIC_DOMAIN` | yes | Public HTTPS domain the bridge is reachable at |
 | `DEFAULT_VOICE` | no | Default Nova Sonic voice (default `tiffany`) |
+| `OPENAI_API_KEY` | for OpenAI | Provider key when a saved agent selects `openai-realtime` |
+| `GOOGLE_API_KEY` | for Gemini | Provider key when a saved agent selects `gemini-live` |
+
+The bridge uses the model selected in the saved agent and negotiates its audio
+rate with AgentCore. Phone audio remains G.711 μ-law at 8 kHz; the bridge
+resamples it to 16 kHz for Nova or 24 kHz for OpenAI and Gemini.
 
 Twilio credentials are **not** consumed by this bridge — Twilio calls the bridge
 via its signed webhook, so there is no Twilio secret to store here.
