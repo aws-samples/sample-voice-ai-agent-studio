@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WizardProvider } from './context/WizardContext';
@@ -6,31 +7,38 @@ import { FilterProvider } from './context/FilterContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import OAuthCallback from './pages/OAuthCallback';
-import Launch from './pages/Launch';
-import Overview from './pages/Overview';
-import Home from './pages/Home';
-import Voice1S from './pages/Voice1S';
-import PipelineSelection from './pages/PipelineSelection';
-import SpeechToSpeech from './pages/SpeechToSpeech';
-import CascadedSpeech from './pages/CascadedSpeech';
-import Agents from './pages/Agents';
-import PromptBuilder from './pages/PromptBuilder';
-import Summary from './pages/Summary';
-import POC from './pages/POC';
-import Demos from './pages/Demos';
-import AgentDetail from './pages/AgentDetail';
-import StartFromScratch from './pages/StartFromScratch';
-import RAG from './pages/integrations/RAG';
-import Tools from './pages/integrations/Tools';
-import Skills from './pages/integrations/Skills';
-import SubAgents from './pages/integrations/SubAgents';
-import Settings from './pages/Settings';
-import PSTN from './pages/telephony/PSTN';
-import SIP from './pages/telephony/SIP';
-import PhoneNumbers from './pages/telephony/PhoneNumbers';
-import EvalSuites from './pages/EvalSuites';
-import EvalSuiteDetail from './pages/EvalSuiteDetail';
-import EvalSuiteCompare from './pages/EvalSuiteCompare';
+
+const Launch = lazy(() => import('./pages/Launch'));
+const Overview = lazy(() => import('./pages/Overview'));
+const Home = lazy(() => import('./pages/Home'));
+const Voice1S = lazy(() => import('./pages/Voice1S'));
+const PipelineSelection = lazy(() => import('./pages/PipelineSelection'));
+const SpeechToSpeech = lazy(() => import('./pages/SpeechToSpeech'));
+const CascadedSpeech = lazy(() => import('./pages/CascadedSpeech'));
+const Agents = lazy(() => import('./pages/Agents'));
+const PromptBuilder = lazy(() => import('./pages/PromptBuilder'));
+const Summary = lazy(() => import('./pages/Summary'));
+const POC = lazy(() => import('./pages/POC'));
+const Demos = lazy(() => import('./pages/Demos'));
+const AgentDetail = lazy(() => import('./pages/AgentDetail'));
+const StartFromScratch = lazy(() => import('./pages/StartFromScratch'));
+const RAG = lazy(() => import('./pages/integrations/RAG'));
+const Tools = lazy(() => import('./pages/integrations/Tools'));
+const Skills = lazy(() => import('./pages/integrations/Skills'));
+const SubAgents = lazy(() => import('./pages/integrations/SubAgents'));
+const Settings = lazy(() => import('./pages/Settings'));
+const PSTN = lazy(() => import('./pages/telephony/PSTN'));
+const SIP = lazy(() => import('./pages/telephony/SIP'));
+const PhoneNumbers = lazy(() => import('./pages/telephony/PhoneNumbers'));
+const EvalSuites = lazy(() => import('./pages/EvalSuites'));
+const EvalSuiteDetail = lazy(() => import('./pages/EvalSuiteDetail'));
+const EvalSuiteCompare = lazy(() => import('./pages/EvalSuiteCompare'));
+
+const pageFallback = (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
+    <p style={{ color: '#545b64', fontSize: '14px' }}>Loading page...</p>
+  </div>
+);
 
 function AuthenticatedApp() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -109,7 +117,9 @@ function AuthenticatedApp() {
 function App() {
   return (
     <AuthProvider>
-      <AuthenticatedApp />
+      <Suspense fallback={pageFallback}>
+        <AuthenticatedApp />
+      </Suspense>
     </AuthProvider>
   );
 }
