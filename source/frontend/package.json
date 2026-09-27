@@ -1,8 +1,8 @@
 {
-  "name": "voice-agent-poc-in-a-box",
+  "name": "sample-voice-ai-agent-studio",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "React frontend for the AWS Conversational AI Agent Studio sample",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -10,16 +10,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lanazhang/voice-agent-poc-in-a-box.git"
+    "url": "git+https://github.com/aws-samples/sample-voice-ai-agent-studio.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["aws", "voice-ai", "agentcore", "react"],
+  "author": "AWS Samples",
+  "license": "MIT-0",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/lanazhang/voice-agent-poc-in-a-box/issues"
+    "url": "https://github.com/aws-samples/sample-voice-ai-agent-studio/issues"
   },
-  "homepage": "https://github.com/lanazhang/voice-agent-poc-in-a-box#readme",
+  "homepage": "https://github.com/aws-samples/sample-voice-ai-agent-studio#readme",
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",
     "@aws-sdk/client-cognito-identity": "^3.1073.0",
