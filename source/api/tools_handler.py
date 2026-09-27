@@ -212,9 +212,51 @@ def test_tool(tool_id, body, user_ctx):
     elif tool_type == "lambda":
         return test_lambda(item, test_payload)
     elif tool_type == "mcp":
-        return response(200, {"result": "MCP test not implemented yet", "status": "skipped"})
+        return test_mcp_gateway(item)
     else:
         return response(400, {"error": f"Unknown tool type: {tool_type}"})
+
+
+def test_mcp_gateway(tool):
+    """Test an MCP integration by resolving its gateway and listing tools."""
+    import time
+
+    gateway_id = tool.get("gatewayId", "")
+    if not gateway_id:
+        return response(400, {"error": "No AgentCore gateway configured"})
+
+    started_at = time.time()
+    detail_response = get_gateway_detail(gateway_id)
+    elapsed_ms = int((time.time() - started_at) * 1000)
+    try:
+        detail = json.loads(detail_response.get("body") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        detail = {}
+
+    if detail_response.get("statusCode") != 200:
+        return response(200, {
+            "result": detail.get("error", "Failed to connect to MCP gateway"),
+            "status": "error",
+            "statusCode": detail_response.get("statusCode", 500),
+            "responseTimeMs": elapsed_ms,
+            "request": {"url": gateway_id, "method": "MCP tools/list", "headers": {}, "body": ""},
+        })
+
+    tools = detail.get("mcpTools", [])
+    note = detail.get("mcpToolsNote", "")
+    gateway_status = detail.get("status", "unknown")
+    succeeded = bool(tools) and not note
+    summary = f"Gateway {gateway_status}; discovered {len(tools)} MCP tool(s)"
+    if note:
+        summary = f"{summary}. {note}"
+
+    return response(200, {
+        "result": summary,
+        "status": "success" if succeeded else "error",
+        "statusCode": 200,
+        "responseTimeMs": elapsed_ms,
+        "request": {"url": detail.get("gatewayUrl", gateway_id), "method": "MCP tools/list", "headers": {}, "body": ""},
+    })
 
 
 def test_webhook(tool, payload):
