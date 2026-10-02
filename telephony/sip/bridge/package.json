@@ -7,7 +7,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "drachtio-srf": "^4.5.0",
+    "drachtio-srf": "^5.0.29",
     "rtpengine-client": "^0.4.0",
     "ws": "^8.16.0",
     "pino": "^8.17.2",
